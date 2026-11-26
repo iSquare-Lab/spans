@@ -10,7 +10,7 @@ function audio(): AudioContext | null {
   if (!enabled) return null;
   try {
     ctx ??= new AudioContext();
-    if (ctx.state === 'suspended') void ctx.resume();
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
     return ctx;
   } catch {
     return null;

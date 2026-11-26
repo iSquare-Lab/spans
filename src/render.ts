@@ -9,9 +9,11 @@ export type Colors = {
   done: string;
   doneText: string;
   over: string;
+  overText: string;
   bridge: string;
   cursor: string;
   hint: string;
+  hintEdge: string;
 };
 
 export function readColors(el: HTMLElement): Colors {
@@ -26,9 +28,11 @@ export function readColors(el: HTMLElement): Colors {
     done: v('--done'),
     doneText: v('--done-text'),
     over: v('--over'),
+    overText: v('--over-text'),
     bridge: v('--bridge'),
     cursor: v('--cursor'),
     hint: v('--hint'),
+    hintEdge: v('--hint-edge'),
   };
 }
 
@@ -39,16 +43,28 @@ export type View = {
   // The island the keyboard is on, shown with a ring when the board has keyboard focus.
   cursor: number | null;
   showCursor: boolean;
+  // The island picked by a tap, shown with a ring until a second tap builds from it.
+  selected: number | null;
   // A drag from an island towards the pointer.
   drag: { from: number; x: number; y: number } | null;
   hint: { edge: number; until: number } | null;
   // 0..1 while the solved glow plays.
   celebrate: number;
+  // Set when the player asks for reduced motion: the hint stays still instead of pulsing.
+  reducedMotion: boolean;
 };
+
+// Space around the grid, in cells, so the ring around a corner island stays clear of the board's edge.
+const MARGIN = 0.1;
+
+// Whether the board still changes on its own at this moment: a hint fading out or the solved glow.
+export function animating(view: View, now: number): boolean {
+  return (view.hint !== null && view.hint.until > now) || view.celebrate > 0;
+}
 
 export function layout(width: number, height: number, game: Game): Pick<View, 'cell' | 'ox' | 'oy'> {
   const { puzzle } = game;
-  const cell = Math.floor(Math.min(width / puzzle.width, height / puzzle.height));
+  const cell = Math.floor(Math.min(width / (puzzle.width + 2 * MARGIN), height / (puzzle.height + 2 * MARGIN)));
   return { cell, ox: Math.floor((width - cell * puzzle.width) / 2), oy: Math.floor((height - cell * puzzle.height) / 2) };
 }
 
@@ -64,6 +80,30 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
   ctx.fillStyle = colors.water;
   ctx.fillRect(0, 0, width, height);
 
+  // The hint's edge, under the dots and bridges: an outline that stands out from the water, filled with a pulse, or
+  // with a steady glow when motion is reduced.
+  if (view.hint && view.hint.until > now) {
+    const edge = puzzle.edges[view.hint.edge];
+    const a = puzzle.islands[edge.a], b = puzzle.islands[edge.b];
+    const [ax, ay] = center(view, a.x, a.y), [bx, by] = center(view, b.x, b.y);
+    const outline = Math.max(1.5, cell * 0.04);
+    const line = (color: string, lineWidth: number) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = lineWidth;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+    };
+    ctx.lineCap = 'round';
+    line(colors.hintEdge, cell * 0.42);
+    line(colors.water, cell * 0.42 - 2 * outline);
+    const pulse = view.reducedMotion ? 0.7 : 0.5 + 0.5 * Math.sin(now / 180);
+    ctx.globalAlpha = 0.25 + 0.35 * pulse;
+    line(colors.hint, cell * 0.42 - 2 * outline);
+    ctx.globalAlpha = 1;
+  }
+
   // Dots where islands could be, so distances are easy to read.
   ctx.fillStyle = colors.grid;
   for (let y = 0; y < puzzle.height; y++) {
@@ -73,23 +113,6 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
       ctx.arc(cx, cy, Math.max(1.2, cell * 0.035), 0, Math.PI * 2);
       ctx.fill();
     }
-  }
-
-  // The hint's edge pulses under the bridges.
-  if (view.hint && view.hint.until > now) {
-    const edge = puzzle.edges[view.hint.edge];
-    const a = puzzle.islands[edge.a], b = puzzle.islands[edge.b];
-    const [ax, ay] = center(view, a.x, a.y), [bx, by] = center(view, b.x, b.y);
-    const pulse = 0.5 + 0.5 * Math.sin(now / 180);
-    ctx.strokeStyle = colors.hint;
-    ctx.globalAlpha = 0.25 + 0.35 * pulse;
-    ctx.lineWidth = cell * 0.42;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(ax, ay);
-    ctx.lineTo(bx, by);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
   }
 
   // Bridges.
@@ -162,17 +185,19 @@ export function draw(ctx: CanvasRenderingContext2D, width: number, height: numbe
       ctx.arc(cx, cy, radius + cell * 0.06, 0, Math.PI * 2);
       ctx.stroke();
     }
-    ctx.fillStyle = done ? colors.doneText : over ? colors.over : colors.islandText;
+    ctx.fillStyle = done ? colors.doneText : over ? colors.overText : colors.islandText;
     ctx.fillText(String(island.need), cx, cy + cell * 0.02);
   }
 
-  if (view.showCursor && view.cursor !== null) {
-    const island = puzzle.islands[view.cursor];
+  const ring = (id: number) => {
+    const island = puzzle.islands[id];
     const [cx, cy] = center(view, island.x, island.y);
     ctx.strokeStyle = colors.cursor;
     ctx.lineWidth = Math.max(2, cell * 0.06);
     ctx.beginPath();
     ctx.arc(cx, cy, radius + cell * 0.12, 0, Math.PI * 2);
     ctx.stroke();
-  }
+  };
+  if (view.showCursor && view.cursor !== null) ring(view.cursor);
+  if (view.selected !== null && !(view.showCursor && view.selected === view.cursor)) ring(view.selected);
 }

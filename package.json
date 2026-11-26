@@ -6,7 +6,7 @@
   "license": "MIT",
   "type": "module",
   "engines": {
-    "node": ">=22.12"
+    "node": "^22.18.0 || ^24.0.0 || >=26"
   },
   "scripts": {
     "dev": "vite",
@@ -14,12 +14,15 @@
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
+    "lint": "oxlint --deny-warnings",
     "puzzles": "node scripts/puzzle-report.ts"
   },
   "dependencies": {
     "@fontsource-variable/outfit": "^5.3.0"
   },
   "devDependencies": {
+    "@types/node": "^24.19.2",
+    "oxlint": "^1.95.0",
     "typescript": "~7.0.2",
     "vite": "^8.3.8",
     "vitest": "^5.1.0"

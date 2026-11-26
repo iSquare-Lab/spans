@@ -42,37 +42,27 @@
             aria-label="Bridge puzzle"
             aria-describedby="board-help board-status"
           ></canvas>
-          <div class="win" id="win" hidden>
-            <div class="win-card" role="dialog" aria-labelledby="win-title" aria-describedby="win-text">
-              <p class="win-kicker" id="win-kicker">Every island is linked</p>
-              <h2 id="win-title">Solved</h2>
-              <p class="win-time" id="win-time"></p>
-              <p id="win-text" class="win-text"></p>
-              <div class="win-actions">
-                <button type="button" class="ghost-btn" id="win-close">Look at it</button>
-                <button type="button" class="ghost-btn" id="win-share">Copy result</button>
-                <button type="button" class="primary-btn" id="win-next">Next puzzle</button>
-              </div>
-            </div>
-          </div>
         </div>
         <p id="board-help" class="visually-hidden">
-          Arrow keys move between islands. Shift and an arrow key adds a bridge in that direction; a third press removes
-          both. U undoes, H gives a hint, R starts over.
+          Arrow keys move between islands. Shift and an arrow key adds a bridge in that direction, a second press adds
+          another and a third removes both. U undoes, H gives a hint, R starts over, N gives a new practice puzzle, M
+          turns sound on or off. With a pointer, tap an island and then a neighbour it sees to build between them.
         </p>
         <p id="board-status" class="visually-hidden" aria-live="polite"></p>
       </section>
 
-      <aside class="panel">
-        <div class="segmented" role="radiogroup" aria-label="Puzzle" id="kind">
-          <button type="button" role="radio" data-kind="daily">Daily</button>
-          <button type="button" role="radio" data-kind="practice">Practice</button>
-        </div>
-        <div class="segmented sizes" role="radiogroup" aria-label="Size" id="difficulty">
-          <button type="button" role="radio" data-difficulty="easy">Easy<small>7×7</small></button>
-          <button type="button" role="radio" data-difficulty="medium">Medium<small>9×9</small></button>
-          <button type="button" role="radio" data-difficulty="hard">Hard<small>12×12</small></button>
-        </div>
+      <aside class="panel" id="panel">
+        <fieldset class="segmented" id="kind">
+          <legend class="visually-hidden">Mode</legend>
+          <label><input type="radio" name="kind" value="daily" />Daily</label>
+          <label><input type="radio" name="kind" value="practice" />Practice</label>
+        </fieldset>
+        <fieldset class="segmented sizes" id="difficulty">
+          <legend class="visually-hidden">Size</legend>
+          <label><input type="radio" name="difficulty" value="easy" />Easy<small>7×7</small></label>
+          <label><input type="radio" name="difficulty" value="medium" />Medium<small>9×9</small></label>
+          <label><input type="radio" name="difficulty" value="hard" />Hard<small>12×12</small></label>
+        </fieldset>
 
         <div class="title-row">
           <h2 id="puzzle-title"></h2>
@@ -99,8 +89,13 @@
         </dl>
 
         <p class="keys">
-          <kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd> move <span aria-hidden="true">·</span> <kbd>Shift</kbd>+arrow bridge
-          <span aria-hidden="true">·</span> <kbd>U</kbd> undo <span aria-hidden="true">·</span> <kbd>H</kbd> hint
+          <span class="key"><kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd> move</span> <span aria-hidden="true">·</span>
+          <span class="key"><kbd>Shift</kbd>+arrow bridge</span> <span aria-hidden="true">·</span>
+          <span class="key"><kbd>U</kbd> undo</span> <span aria-hidden="true">·</span>
+          <span class="key"><kbd>H</kbd> hint</span> <span aria-hidden="true">·</span>
+          <span class="key"><kbd>R</kbd> start over</span> <span aria-hidden="true">·</span>
+          <span class="key"><kbd>N</kbd> new practice</span> <span aria-hidden="true">·</span>
+          <span class="key"><kbd>M</kbd> sound</span>
         </p>
       </aside>
     </main>
@@ -116,10 +111,22 @@
         <li>Two islands share at most two bridges, and bridges never cross.</li>
         <li>When you are done, every island can reach every other one.</li>
       </ol>
-      <p><strong>To build:</strong> drag from an island towards a neighbour, or tap the water between them. Again for a second bridge, a third time to remove them.</p>
+      <p><strong>To build:</strong> drag from an island towards a neighbour, tap the water between them, or tap one island and then the other. Do it again for a second bridge and a third time to remove both. With a keyboard, press Shift and an arrow key.</p>
       <p>Islands turn green when they have the right number of bridges and red when they have too many.</p>
       <p>Every puzzle has exactly one solution, reached by reasoning alone. Easy puzzles never need more than one step of thinking at a time; hard ones ask you to look further ahead.</p>
       <p>The daily puzzles are the same for everyone and change at midnight. Your progress stays in this browser.</p>
+    </dialog>
+
+    <dialog class="win-card" id="win" aria-labelledby="win-title" aria-describedby="win-text">
+      <p class="win-kicker" id="win-kicker">Every island is linked</p>
+      <h2 id="win-title">Solved</h2>
+      <p class="win-time" id="win-time"></p>
+      <p id="win-text" class="win-text"></p>
+      <div class="win-actions">
+        <button type="button" class="ghost-btn" id="win-close">Look at it</button>
+        <button type="button" class="ghost-btn" id="win-share">Copy result</button>
+        <button type="button" class="primary-btn" id="win-next" autofocus>Next puzzle</button>
+      </div>
     </dialog>
 
     <script type="module" src="/src/main.ts"></script>

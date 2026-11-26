@@ -10,10 +10,11 @@ every island has its number and all of them are joined into one group.
   puzzles never need more than one step of thinking at a time; harder ones ask you to look further ahead.
 - **Hints that teach.** A hint first points out a bridge that is not part of the solution, then a bridge the rules
   force from what you have built, and says why in words ("The 4 at row 2, column 5 needs two bridges east…").
-- **Play your way:** drag from an island towards a neighbour, or tap the water between two islands (again for a
-  second bridge, a third time to remove them). Full keyboard play: arrow keys move between islands,
+- **Play your way:** drag from an island towards a neighbour, tap the water between two islands, or tap one island
+  (it gets a ring) and then a neighbour it sees. Each time adds a bridge; the third time removes both. Tapping the
+  water or pressing <kbd>Esc</kbd> drops the selection. Full keyboard play: arrow keys move between islands,
   <kbd>Shift</kbd>+arrow builds, <kbd>U</kbd> undo, <kbd>H</kbd> hint, <kbd>R</kbd> start over, <kbd>N</kbd> new
-  practice puzzle, <kbd>M</kbd> sound. A live region describes each island and each change for screen readers.
+  practice puzzle, <kbd>M</kbd> sound (letters work while the board or the side panel has focus). A live region describes each island and each change for screen readers.
 - Timer, best times, day streak and a result to copy and share. Light and dark themes, synthesised sounds (Web
   Audio), works from 320 px wide. Progress stays in this browser's `localStorage`; nothing is sent anywhere.
 
@@ -25,8 +26,10 @@ person uses (island counts, crossings, groups that would be cut off) and tries v
 enough. A puzzle is kept only if it has exactly one solution and its amount of trying fits its size: none at all
 for Easy. `npm run puzzles` prints how long puzzles take to make and how hard they are.
 
-The unit tests check the rules, that every size gives the same puzzle for the same seed with exactly one solution,
-and that following the hints alone, even from a wrong start, always ends in the solution.
+The unit tests check the rules and the solver's reasoning, that every size gives the same puzzle for the same seed
+with exactly one solution, that the daily puzzles of a fixed date never change, the order of hints, and that
+following the hints alone, even from a wrong start, always ends in the solution. Saved data read back from the
+browser is checked too, so a damaged save starts a fresh game instead of breaking one.
 
 ## Run
 
@@ -34,10 +37,11 @@ and that following the hints alone, even from a wrong start, always ends in the 
 npm ci
 npm run dev      # development server
 npm test         # unit tests
+npm run lint     # oxlint
 npm run build    # type-check and build to dist/
 ```
 
-Requires Node 22.12 or later.
+Requires Node 22.18 or a later 22.x, Node 24, or Node 26 and later.
 
 ## Licence
 

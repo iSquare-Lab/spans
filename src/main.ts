@@ -4,9 +4,17 @@ import { playBlocked, playBridge, playIsland, playSolved, setSound } from './aud
 import { dailySeed, dayNumber, formatTime, spokenTime, streak, today } from './daily.ts';
 import { Game } from './game.ts';
 import { generate, type Difficulty } from './generator.ts';
-import { blockers, directionName, edgeBetween, neighbour } from './puzzle.ts';
-import { center, draw, layout, readColors, type Colors, type View } from './render.ts';
-import { loadGame, loadPrefs, loadStats, saveGame, savePrefs, saveStats, saveTheme, type Kind } from './storage.ts';
+import { bindBoard, bindShortcuts } from './input.ts';
+import { blockers, directionName } from './puzzle.ts';
+import { animating, draw, layout, readColors, type Colors, type View } from './render.ts';
+import { loadGame, loadPrefs, loadStats, loadTheme, saveGame, savePrefs, saveStats, saveTheme, type Kind } from './storage.ts';
+
+// How long the solved glow lasts, the pause before the solved card, how long a hint stays lit, and how long the share
+// button says "Copied".
+const SOLVED_GLOW_MS = 1400;
+const WIN_CARD_DELAY_MS = 650;
+const HINT_MS = 4000;
+const COPIED_MS = 1800;
 
 const ICONS: Record<string, string> = {
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6"/><circle cx="12" cy="17" r=".6" fill="currentColor"/>',
@@ -31,21 +39,43 @@ const ctx = canvas.getContext('2d')!;
 const status = $('board-status');
 const hintText = $('hint-text');
 const timerEl = $('timer');
-const win = $('win');
+const win = $<HTMLDialogElement>('win');
+const helpDialog = $<HTMLDialogElement>('help-dialog');
+const kindRadios = [...document.querySelectorAll<HTMLInputElement>('input[name="kind"]')];
+const difficultyRadios = [...document.querySelectorAll<HTMLInputElement>('input[name="difficulty"]')];
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
+const narrow = window.matchMedia('(max-width: 900px)');
 
 const prefs = loadPrefs();
-let stats = loadStats();
+const stats = loadStats();
 setSound(prefs.sound);
 
-let game!: Game;
+let active: Game | undefined;
 let seed = 0;
 let date = today();
 let elapsed = 0;
 let runningSince: number | null = null;
 let solvedShown = false;
+let glowStart: number | null = null;
+let winTimer: number | undefined;
 let colors: Colors = readColors(document.documentElement);
 let size = { w: 0, h: 0 };
-const view: View = { cell: 0, ox: 0, oy: 0, cursor: 0, showCursor: false, drag: null, hint: null, celebrate: 0 };
+const view: View = {
+  cell: 0,
+  ox: 0,
+  oy: 0,
+  cursor: 0,
+  showCursor: false,
+  selected: null,
+  drag: null,
+  hint: null,
+  celebrate: 0,
+  reducedMotion: reducedMotion.matches,
+};
+
+// The puzzle being played. Only undefined while the first one is made, before any input can reach it.
+const current = (): Game => active!;
 
 // ── Starting a puzzle ──────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -55,32 +85,36 @@ function practiceSeed(): number {
 
 function start(difficulty: Difficulty, kind: Kind, fresh = false): void {
   persist();
+  window.clearTimeout(winTimer);
+  if (win.open) win.close();
   prefs.difficulty = difficulty;
   prefs.kind = kind;
   savePrefs(prefs);
   date = today();
-  const saved = fresh ? null : loadGame(difficulty, kind);
-  if (kind === 'daily') {
-    seed = dailySeed(date, difficulty);
-  } else {
-    seed = saved && !saved.solved ? saved.seed : practiceSeed();
-  }
-  const usable = saved && saved.seed === seed && (kind === 'practice' || saved.date === date);
+  const stored = fresh ? null : loadGame(difficulty, kind);
+  seed = kind === 'daily' ? dailySeed(date, difficulty) : stored && !stored.solved ? stored.seed : practiceSeed();
   const made = generate(difficulty, seed);
-  game = new Game(made.puzzle, made.solution, usable ? saved.bridges : undefined);
-  game.hints = usable ? saved.hints : 0;
-  elapsed = usable ? saved.elapsed : 0;
-  solvedShown = usable ? saved.solved : false;
+  // A saved game counts only for this very puzzle: same seed, same day for a daily, a bridge count for every edge.
+  const saved =
+    stored && stored.seed === seed && (kind === 'practice' || stored.date === date) && stored.bridges.length === made.puzzle.edges.length
+      ? stored
+      : null;
+  active = new Game(made.puzzle, made.solution, saved?.bridges);
+  active.hints = saved?.hints ?? 0;
+  elapsed = saved?.elapsed ?? 0;
+  solvedShown = saved?.solved ?? false;
   runningSince = null;
+  glowStart = null;
   view.cursor = 0;
+  view.selected = null;
   view.hint = null;
   view.celebrate = 0;
-  win.hidden = true;
   hintText.textContent = '';
   updateChrome();
   resize();
-  if (!solvedShown) resume();
-  status.textContent = `${title()}. ${game.puzzle.islands.length} islands.`;
+  resume();
+  showTime();
+  status.textContent = `${title()}. ${active.puzzle.islands.length} islands.`;
 }
 
 function title(): string {
@@ -89,23 +123,36 @@ function title(): string {
 }
 
 function persist(): void {
-  if (!game) return;
+  if (!active) return;
   pause();
-  saveGame(prefs.difficulty, prefs.kind, { seed, bridges: game.bridges, elapsed, hints: game.hints, solved: solvedShown, date });
+  saveGame(prefs.difficulty, prefs.kind, { seed, bridges: active.bridges, elapsed, hints: active.hints, solved: solvedShown, date });
 }
 
 // ── Time ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+let timerId: number | undefined;
+
+// The clock runs while the puzzle is open, unsolved, visible and not covered by the help.
 function resume(): void {
-  if (runningSince === null && !solvedShown && document.visibilityState === 'visible') runningSince = performance.now();
+  if (runningSince !== null || solvedShown || helpDialog.open || document.visibilityState !== 'visible') return;
+  runningSince = performance.now();
+  showTime();
 }
 function pause(): void {
-  if (runningSince !== null) {
-    elapsed += performance.now() - runningSince;
-    runningSince = null;
-  }
+  if (runningSince === null) return;
+  elapsed += performance.now() - runningSince;
+  runningSince = null;
+  showTime();
 }
 const timeNow = () => elapsed + (runningSince === null ? 0 : performance.now() - runningSince);
+
+// Writes the time, then, while the clock runs, again when the next second starts.
+function showTime(): void {
+  window.clearTimeout(timerId);
+  const ms = timeNow();
+  timerEl.textContent = formatTime(ms);
+  if (runningSince !== null) timerId = window.setTimeout(showTime, 1000 - (ms % 1000));
+}
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
@@ -118,7 +165,10 @@ window.addEventListener('pagehide', persist);
 
 // ── Changing bridges ───────────────────────────────────────────────────────────────────────────────────────────────
 
+const complete = (island: number) => current().count(island) === current().puzzle.islands[island].need;
+
 function cycle(edgeId: number): void {
+  const game = current();
   if (solvedShown) return;
   const next = game.next(edgeId);
   const edge = game.puzzle.edges[edgeId];
@@ -128,29 +178,25 @@ function cycle(edgeId: number): void {
     status.textContent = `A bridge between ${game.name(edge.a)} and ${game.name(edge.b)} would cross the bridge between ${game.name(other.a)} and ${game.name(other.b)}.`;
     return;
   }
-  const before = [game.count(edge.a) === game.puzzle.islands[edge.a].need, game.count(edge.b) === game.puzzle.islands[edge.b].need];
+  const before = [complete(edge.a), complete(edge.b)];
   game.set(edgeId, next);
   view.hint = null;
   hintText.textContent = '';
-  afterChange(edgeId, before);
-}
-
-function afterChange(edgeId: number, before: boolean[]): void {
-  const edge = game.puzzle.edges[edgeId];
-  const count = game.bridges[edgeId];
-  const after = [game.count(edge.a) === game.puzzle.islands[edge.a].need, game.count(edge.b) === game.puzzle.islands[edge.b].need];
+  const after = [complete(edge.a), complete(edge.b)];
   if ((after[0] && !before[0]) || (after[1] && !before[1])) playIsland();
-  else playBridge(count);
+  else playBridge(next);
   const A = game.puzzle.islands[edge.a], B = game.puzzle.islands[edge.b];
-  status.textContent = `${count === 0 ? 'No bridge' : count === 1 ? 'One bridge' : 'Two bridges'} ${directionName(Math.sign(B.x - A.x), Math.sign(B.y - A.y))} from ${game.name(edge.a)} to ${game.name(edge.b)}. ${describeIsland(view.cursor ?? edge.a)}`;
-  resume();
+  const bridges = next === 0 ? 'No bridge' : next === 1 ? 'One bridge' : 'Two bridges';
+  status.textContent = `${bridges} ${directionName(Math.sign(B.x - A.x), Math.sign(B.y - A.y))} from ${game.name(edge.a)} to ${game.name(edge.b)}. ${describeIsland(edge.a)} ${describeIsland(edge.b)}`;
   updateChrome();
   persist();
   resume();
+  redraw();
   if (game.solved()) solved();
 }
 
 function solved(): void {
+  const game = current();
   pause();
   solvedShown = true;
   const ms = Math.round(elapsed);
@@ -159,26 +205,22 @@ function solved(): void {
     stats.daily[date] ??= {};
     stats.daily[date][prefs.difficulty] ??= { ms, hints: game.hints };
   }
-  if (game.hints === 0 && (stats.best[prefs.difficulty] === undefined || ms < stats.best[prefs.difficulty]!)) stats.best[prefs.difficulty] = ms;
+  const best = stats.best[prefs.difficulty];
+  if (game.hints === 0 && (best === undefined || ms < best)) stats.best[prefs.difficulty] = ms;
   saveStats(stats);
   persist();
   playSolved();
-  const startAt = performance.now();
-  const glow = (t: number) => {
-    view.celebrate = Math.max(0, 1 - (t - startAt) / 1400);
-    if (view.celebrate > 0) requestAnimationFrame(glow);
-  };
-  requestAnimationFrame(glow);
+  if (!view.reducedMotion) {
+    glowStart = performance.now();
+    redraw();
+  }
   $('win-time').textContent = formatTime(ms);
   $('win-kicker').textContent = title();
   $('win-text').textContent =
     (game.hints ? `With ${game.hints} hint${game.hints === 1 ? '' : 's'}. ` : 'No hints. ') +
     (prefs.kind === 'daily' ? `Day streak: ${streak(stats, date)}. A new daily puzzle comes at midnight.` : 'Another one is ready when you are.');
   $('win-next').textContent = prefs.kind === 'daily' ? nextDailyLabel() : 'New puzzle';
-  setTimeout(() => {
-    win.hidden = false;
-    $('win-next').focus();
-  }, 650);
+  winTimer = window.setTimeout(() => win.showModal(), WIN_CARD_DELAY_MS);
   status.textContent = `Solved in ${spokenTime(ms)}.`;
   updateChrome();
 }
@@ -198,27 +240,29 @@ function nextDailyLabel(): string {
 // ── Hints ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 function hint(): void {
+  const game = current();
   if (solvedShown) return;
   const h = game.hint();
   if (!h) return;
   game.hints++;
-  view.hint = { edge: h.edge, until: performance.now() + 4000 };
-  const edge = game.puzzle.edges[h.edge];
-  view.cursor = edge.a;
-  hintText.textContent = h.kind === 'wrong' ? `${h.text} Tap it to change it.` : h.text;
+  view.hint = { edge: h.edge, until: performance.now() + HINT_MS };
+  view.cursor = game.puzzle.edges[h.edge].a;
+  hintText.textContent =
+    h.kind === 'wrong' ? `${h.text} Tap the bridge, or press Shift and an arrow from either island, to cycle it: one, two, none.` : h.text;
   persist();
   resume();
   updateChrome();
+  redraw();
 }
 
 // ── Screen ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
 function updateChrome(): void {
-  for (const b of document.querySelectorAll<HTMLButtonElement>('#kind [data-kind]')) b.setAttribute('aria-checked', String(b.dataset.kind === prefs.kind));
-  for (const b of document.querySelectorAll<HTMLButtonElement>('#difficulty [data-difficulty]')) {
-    const d = b.dataset.difficulty as Difficulty;
-    b.setAttribute('aria-checked', String(d === prefs.difficulty));
-    b.classList.toggle('done-today', prefs.kind === 'daily' && Boolean(stats.daily[date]?.[d]));
+  const game = current();
+  for (const r of kindRadios) r.checked = r.value === prefs.kind;
+  for (const r of difficultyRadios) {
+    r.checked = r.value === prefs.difficulty;
+    r.parentElement!.classList.toggle('done-today', prefs.kind === 'daily' && Boolean(stats.daily[date]?.[r.value as Difficulty]));
   }
   $('puzzle-title').textContent = title();
   $('puzzle-sub').textContent = prefs.kind === 'daily'
@@ -235,9 +279,9 @@ function updateChrome(): void {
   $('streak').textContent = days ? `${days} day${days === 1 ? '' : 's'}` : '';
   $('streak').title = 'Days in a row with a daily puzzle solved';
   $('solved-count').textContent = String(stats.solved);
-  ($('undo-btn') as HTMLButtonElement).disabled = solvedShown || game.history.length === 0;
-  ($('hint-btn') as HTMLButtonElement).disabled = solvedShown;
-  ($('reset-btn') as HTMLButtonElement).disabled = solvedShown || game.bridges.every((b) => b === 0);
+  $<HTMLButtonElement>('undo-btn').disabled = solvedShown || game.history.length === 0;
+  $<HTMLButtonElement>('hint-btn').disabled = solvedShown;
+  $<HTMLButtonElement>('reset-btn').disabled = solvedShown || game.bridges.every((b) => b === 0);
   $('new-btn').hidden = prefs.kind === 'daily';
   canvas.setAttribute('aria-label', `${title()}: ${islands.length} islands, ${done} complete`);
 }
@@ -252,179 +296,65 @@ function resize(): void {
   canvas.height = Math.round(side * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   size = { w: side, h: side };
-  Object.assign(view, layout(side, side, game));
+  Object.assign(view, layout(side, side, current()));
+  redraw();
 }
-new ResizeObserver(() => game && resize()).observe(frame);
+new ResizeObserver(() => active && resize()).observe(frame);
 
-function frameLoop(t: number): void {
-  if (game && size.w) draw(ctx, size.w, size.h, game, view, colors, t);
-  timerEl.textContent = game ? formatTime(timeNow()) : '0:00';
-  requestAnimationFrame(frameLoop);
+// The board is drawn only when something changed, and on every frame only while a hint or the solved glow runs.
+let frameRequested = false;
+function redraw(): void {
+  if (frameRequested) return;
+  frameRequested = true;
+  requestAnimationFrame(paint);
 }
-
-// ── Pointer ──────────────────────────────────────────────────────────────────────────────────────────────────────
-
-function pointAt(e: PointerEvent): [number, number] {
-  const rect = canvas.getBoundingClientRect();
-  return [e.clientX - rect.left, e.clientY - rect.top];
-}
-
-function islandAt(px: number, py: number): number | undefined {
-  let best: number | undefined, bestD = view.cell * 0.5;
-  for (const island of game.puzzle.islands) {
-    const [cx, cy] = center(view, island.x, island.y);
-    const d = Math.hypot(px - cx, py - cy);
-    if (d < bestD) {
-      bestD = d;
-      best = island.id;
-    }
-  }
-  return best;
+function paint(t: number): void {
+  frameRequested = false;
+  if (!active || !size.w) return;
+  view.celebrate = glowStart === null ? 0 : Math.max(0, 1 - (t - glowStart) / SOLVED_GLOW_MS);
+  if (view.celebrate === 0) glowStart = null;
+  draw(ctx, size.w, size.h, active, view, colors, t);
+  if (animating(view, t)) redraw();
 }
 
-// The edge whose line passes closest to a point in open water, within half a cell.
-function edgeAt(px: number, py: number): number | undefined {
-  let best: number | undefined, bestD = view.cell * 0.45;
-  for (const edge of game.puzzle.edges) {
-    const a = game.puzzle.islands[edge.a], b = game.puzzle.islands[edge.b];
-    const [ax, ay] = center(view, a.x, a.y), [bx, by] = center(view, b.x, b.y);
-    const inside = edge.horizontal ? px > ax && px < bx : py > ay && py < by;
-    if (!inside) continue;
-    const d = edge.horizontal ? Math.abs(py - ay) : Math.abs(px - ax);
-    if (d < bestD) {
-      bestD = d;
-      best = edge.id;
-    }
-  }
-  return best;
-}
-
-let down: { island?: number; x: number; y: number; moved: boolean } | null = null;
-
-canvas.addEventListener('pointerdown', (e) => {
-  if (!game) return;
-  const [x, y] = pointAt(e);
-  view.showCursor = false;
-  down = { island: islandAt(x, y), x, y, moved: false };
-  canvas.setPointerCapture(e.pointerId);
-});
-
-canvas.addEventListener('pointermove', (e) => {
-  if (!down || down.island === undefined) return;
-  const [x, y] = pointAt(e);
-  if (Math.hypot(x - down.x, y - down.y) > view.cell * 0.25) down.moved = true;
-  if (down.moved) view.drag = { from: down.island, x, y };
-});
-
-canvas.addEventListener('pointerup', (e) => {
-  if (!down) return;
-  const [x, y] = pointAt(e);
-  const start = down;
-  down = null;
-  view.drag = null;
-  if (start.island !== undefined) {
-    if (start.moved) {
-      const dx = x - start.x, dy = y - start.y;
-      const [sx, sy] = Math.abs(dx) >= Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)];
-      const other = neighbour(game.puzzle, start.island, sx, sy);
-      if (other !== undefined) cycle(edgeBetween(game.puzzle, start.island, other)!.id);
-      view.cursor = start.island;
-    } else {
-      // A tap on an island next to the selected one builds between them; otherwise it selects.
-      const edge = view.cursor !== null && view.cursor !== start.island ? edgeBetween(game.puzzle, view.cursor, start.island) : undefined;
-      if (edge) cycle(edge.id);
-      else {
-        view.cursor = start.island;
-        status.textContent = describeIsland(start.island);
-      }
-    }
-    return;
-  }
-  if (Math.hypot(x - start.x, y - start.y) < view.cell * 0.5) {
-    const edge = edgeAt(x, y);
-    if (edge !== undefined) cycle(edge);
-  }
-});
-canvas.addEventListener('pointercancel', () => {
-  down = null;
-  view.drag = null;
-});
-
-// ── Keyboard ─────────────────────────────────────────────────────────────────────────────────────────────────────
+// ── Input ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 function describeIsland(id: number): string {
-  const island = game.puzzle.islands[id];
-  const count = game.count(id);
+  const island = current().puzzle.islands[id];
+  const count = current().count(id);
   const state = count === island.need ? 'complete' : count > island.need ? `${count - island.need} too many` : `${island.need - count} to go`;
   return `Island ${island.need} at row ${island.y + 1}, column ${island.x + 1}: ${count} of ${island.need} bridges, ${state}.`;
 }
 
-// The island reached by an arrow: the one it sees in that direction, or else the nearest one roughly that way.
-function step(from: number, dx: number, dy: number): number | undefined {
-  const seen = neighbour(game.puzzle, from, dx, dy);
-  if (seen !== undefined) return seen;
-  const me = game.puzzle.islands[from];
-  let best: number | undefined, bestScore = Infinity;
-  for (const island of game.puzzle.islands) {
-    const ax = (island.x - me.x) * dx + (island.y - me.y) * dy;
-    if (ax <= 0) continue;
-    const side = Math.abs((island.x - me.x) * dy + (island.y - me.y) * dx);
-    const score = ax + side * 2;
-    if (score < bestScore) {
-      bestScore = score;
-      best = island.id;
-    }
-  }
-  return best;
-}
-
-const ARROWS: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
-
-canvas.addEventListener('keydown', (e) => {
-  const arrow = ARROWS[e.key];
-  if (!arrow || !game) return;
-  e.preventDefault();
-  view.showCursor = true;
-  const from = view.cursor ?? 0;
-  if (e.shiftKey) {
-    const other = neighbour(game.puzzle, from, arrow[0], arrow[1]);
-    if (other === undefined) {
-      status.textContent = `No island ${directionName(arrow[0], arrow[1])} of this one.`;
-      playBlocked();
-    } else cycle(edgeBetween(game.puzzle, from, other)!.id);
-    return;
-  }
-  const to = step(from, arrow[0], arrow[1]);
-  if (to !== undefined) {
-    view.cursor = to;
-    status.textContent = describeIsland(to);
-  }
-});
-canvas.addEventListener('focus', () => {
-  view.showCursor = true;
-});
-canvas.addEventListener('blur', () => {
-  view.showCursor = false;
+bindBoard(canvas, view, {
+  game: () => active,
+  build: cycle,
+  select: (island) => {
+    if (island === view.selected) return;
+    view.selected = island;
+    if (island !== null) status.textContent = `${describeIsland(island)} Selected: tap an island it sees to build a bridge.`;
+    redraw();
+  },
+  moveTo: (island) => {
+    status.textContent = describeIsland(island);
+  },
+  noIsland: (dx, dy) => {
+    status.textContent = `No island ${directionName(dx, dy)} of this one.`;
+    playBlocked();
+  },
+  redraw,
 });
 
-document.addEventListener('keydown', (e) => {
-  if (e.target instanceof HTMLInputElement || e.metaKey || e.altKey || (document.querySelector('dialog[open]') && e.key !== 'Escape')) return;
-  if (e.ctrlKey && e.key.toLowerCase() === 'z') {
-    e.preventDefault();
-    undo();
-    return;
-  }
-  if (e.ctrlKey) return;
-  switch (e.key.toLowerCase()) {
-    case 'u': undo(); break;
-    case 'h': hint(); break;
-    case 'r': restart(); break;
-    case 'n': if (prefs.kind === 'practice') start(prefs.difficulty, 'practice', true); break;
-    case 'm': toggleSound(); break;
-  }
+bindShortcuts([canvas, $('panel')], {
+  undo,
+  hint,
+  restart,
+  newPuzzle: () => prefs.kind === 'practice' && start(prefs.difficulty, 'practice', true),
+  sound: toggleSound,
 });
 
 function undo(): void {
+  const game = current();
   if (solvedShown) return;
   const edge = game.undo();
   if (edge === null) return;
@@ -434,16 +364,20 @@ function undo(): void {
   updateChrome();
   persist();
   resume();
+  redraw();
 }
 
 function restart(): void {
+  const game = current();
   if (solvedShown || game.bridges.every((b) => b === 0)) return;
   if (!window.confirm('Remove every bridge and start this puzzle over? The clock keeps running.')) return;
   game.restart();
+  view.selected = null;
   status.textContent = 'Every bridge removed.';
   updateChrome();
   persist();
   resume();
+  redraw();
 }
 
 function toggleSound(): void {
@@ -458,57 +392,52 @@ function soundButton(): void {
   b.innerHTML = icon(prefs.sound ? 'sound' : 'mute');
 }
 
-// ── Buttons ──────────────────────────────────────────────────────────────────────────────────────────────────────
+// ── Buttons and settings ─────────────────────────────────────────────────────────────────────────────────────────
 
 $('undo-btn').addEventListener('click', undo);
 $('hint-btn').addEventListener('click', hint);
 $('reset-btn').addEventListener('click', restart);
 $('new-btn').addEventListener('click', () => start(prefs.difficulty, 'practice', true));
 $('sound-btn').addEventListener('click', toggleSound);
-$('theme-btn').addEventListener('click', () => {
-  const dark = document.documentElement.getAttribute('data-theme')
-    ? document.documentElement.getAttribute('data-theme') === 'dark'
-    : window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const next = dark ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', next);
-  saveTheme(next);
-  colors = readColors(document.documentElement);
-});
-window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-  colors = readColors(document.documentElement);
-});
-for (const b of document.querySelectorAll<HTMLButtonElement>('#kind [data-kind]')) {
-  b.addEventListener('click', () => b.dataset.kind !== prefs.kind && start(prefs.difficulty, b.dataset.kind as Kind));
-}
-for (const b of document.querySelectorAll<HTMLButtonElement>('#difficulty [data-difficulty]')) {
-  b.addEventListener('click', () => b.dataset.difficulty !== prefs.difficulty && start(b.dataset.difficulty as Difficulty, prefs.kind));
-}
-// Arrow keys move within a radio group, as in any set of radio buttons.
-for (const group of document.querySelectorAll<HTMLElement>('.segmented')) {
-  group.addEventListener('keydown', (e) => {
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-    const buttons = [...group.querySelectorAll<HTMLButtonElement>('button')];
-    const i = buttons.indexOf(document.activeElement as HTMLButtonElement);
-    const next = buttons[(i + (e.key === 'ArrowRight' ? 1 : buttons.length - 1)) % buttons.length];
-    next.focus();
-    next.click();
-    e.preventDefault();
-  });
-}
 
-$('win-close').addEventListener('click', () => {
-  win.hidden = true;
-  canvas.focus();
+function setTheme(theme: 'light' | 'dark'): void {
+  document.documentElement.setAttribute('data-theme', theme);
+  colors = readColors(document.documentElement);
+  redraw();
+}
+$('theme-btn').addEventListener('click', () => {
+  const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  saveTheme(next);
+  setTheme(next);
 });
+// Without a theme picked in Spans, the board follows the system's.
+systemDark.addEventListener('change', () => loadTheme() === null && setTheme(systemDark.matches ? 'dark' : 'light'));
+reducedMotion.addEventListener('change', () => {
+  view.reducedMotion = reducedMotion.matches;
+  redraw();
+});
+
+// Native radios: arrow keys move and check within a group, and each group is one tab stop.
+function switched(difficulty: Difficulty, kind: Kind): void {
+  start(difficulty, kind);
+  // On a narrow screen the panel is below the board: bring the new board back into view.
+  if (narrow.matches) frame.scrollIntoView({ block: 'nearest', behavior: view.reducedMotion ? 'auto' : 'smooth' });
+}
+for (const r of kindRadios) r.addEventListener('change', () => r.checked && switched(prefs.difficulty, r.value as Kind));
+for (const r of difficultyRadios) r.addEventListener('change', () => r.checked && switched(r.value as Difficulty, prefs.kind));
+
+// The solved card: Escape and "Look at it" both close it and go back to the board.
+$('win-close').addEventListener('click', () => win.close());
+win.addEventListener('close', () => canvas.focus());
 $('win-next').addEventListener('click', () => {
   if (prefs.kind === 'daily') {
     const next = nextDaily();
     start(next.difficulty, next.kind, next.kind === 'practice');
   } else start(prefs.difficulty, 'practice', true);
-  canvas.focus();
 });
 $('win-share').addEventListener('click', async () => {
-  const text = `Spans · ${title()} · ${formatTime(elapsed)}${game.hints ? ` · ${game.hints} hint${game.hints === 1 ? '' : 's'}` : ' · no hints'}`;
+  const hints = current().hints;
+  const text = `Spans · ${title()} · ${formatTime(elapsed)}${hints ? ` · ${hints} hint${hints === 1 ? '' : 's'}` : ' · no hints'}`;
   const button = $('win-share');
   try {
     await navigator.clipboard.writeText(text);
@@ -516,13 +445,21 @@ $('win-share').addEventListener('click', async () => {
   } catch {
     button.textContent = 'Could not copy';
   }
-  setTimeout(() => (button.textContent = 'Copy result'), 1800);
+  window.setTimeout(() => (button.textContent = 'Copy result'), COPIED_MS);
 });
 
-const helpDialog = $<HTMLDialogElement>('help-dialog');
-$('help-btn').addEventListener('click', () => helpDialog.showModal());
+// The help stops the clock while it is open and hands focus back to the board when it closes.
+function openHelp(): void {
+  pause();
+  helpDialog.showModal();
+}
+$('help-btn').addEventListener('click', openHelp);
 $('help-close').addEventListener('click', () => helpDialog.close());
 helpDialog.addEventListener('click', (e) => e.target === helpDialog && helpDialog.close());
+helpDialog.addEventListener('close', () => {
+  resume();
+  canvas.focus();
+});
 
 soundButton();
 start(prefs.difficulty, prefs.kind);
@@ -530,9 +467,8 @@ start(prefs.difficulty, prefs.kind);
 try {
   if (!window.localStorage.getItem('spans:seen-help')) {
     window.localStorage.setItem('spans:seen-help', '1');
-    helpDialog.showModal();
+    openHelp();
   }
 } catch {
-  /* ignore */
+  /* storage unavailable: skip the first-visit help */
 }
-requestAnimationFrame(frameLoop);

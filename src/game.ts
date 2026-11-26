@@ -69,7 +69,7 @@ export class Game {
       }
     }
     for (let e = 0; e < bridges.length; e++) {
-      if (bridges[e] < solution[e]) return { kind: 'reveal', edge: e, value: solution[e], text: this.describeForced(e, solution[e]) };
+      if (bridges[e] < solution[e]) return { kind: 'reveal', edge: e, value: solution[e], text: this.describeReveal(e, solution[e]) };
     }
     return null;
   }
@@ -80,12 +80,23 @@ export class Game {
     return `${many === 2 ? 'These two bridges' : 'One bridge'} between ${this.name(a)} and ${this.name(b)} ${many === 2 ? 'are' : 'is'} not part of the solution.`;
   }
 
+  // What the rules force from the bridges built so far.
   private describeForced(edge: number, value: number): string {
+    const text = `${this.name(this.puzzle.edges[edge].a)} needs ${this.span(edge, value)}.`;
+    return text[0].toUpperCase() + text.slice(1);
+  }
+
+  // A bridge taken from the solution, when reasoning from what is built does not force one yet.
+  private describeReveal(edge: number, value: number): string {
+    return `In the solution, ${this.name(this.puzzle.edges[edge].a)} has ${this.span(edge, value)}.`;
+  }
+
+  // "two bridges east to the 2 at row 3, column 5"
+  private span(edge: number, value: number): string {
     const { a, b } = this.puzzle.edges[edge];
     const A = this.puzzle.islands[a], B = this.puzzle.islands[b];
     const dir = directionName(Math.sign(B.x - A.x), Math.sign(B.y - A.y));
-    const text = `${this.name(a)} needs ${value === 2 ? 'two bridges' : 'a bridge'} ${dir} to ${this.name(b)}.`;
-    return text[0].toUpperCase() + text.slice(1);
+    return `${value === 2 ? 'two bridges' : 'a bridge'} ${dir} to ${this.name(b)}`;
   }
 
   name(island: number): string {

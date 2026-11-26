@@ -12,43 +12,20 @@
   --water-dot: #b9d4d7;
   --island: #fbf6e8;
   --island-text: #18343a;
-  --island-edge: #b8a57a;
-  --done: #0d8a6c;
+  --island-edge: #8f7a4c;
+  --done: #0b7a60;
   --done-text: #ffffff;
-  --over: #d93d4c;
+  --over: #c02a3a;
+  --over-text: #c02a3a;
   --bridge: #6b5531;
   --cursor: #0b7f70;
   --hint: #f0b429;
+  --hint-edge: #9a6400;
   --shadow: 0 1px 2px rgb(10 40 45 / 0.06), 0 10px 30px rgb(10 40 45 / 0.08);
   --font: 'Outfit Variable', 'Outfit', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    color-scheme: dark;
-    --bg: #071a20;
-    --surface: #0d252c;
-    --surface-2: #112e36;
-    --border: #1d3f48;
-    --text: #e8f3f2;
-    --muted: #9dbbbf;
-    --accent: #3fe0b8;
-    --on-accent: #052019;
-    --water: #0a2d36;
-    --water-dot: #1c4751;
-    --island: #f4ecd6;
-    --island-text: #13292e;
-    --island-edge: #c9b88f;
-    --done: #2fd3a5;
-    --done-text: #052019;
-    --over: #ff6b78;
-    --bridge: #e8d9b0;
-    --cursor: #7ff0d3;
-    --hint: #ffc94a;
-    --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 40px rgb(0 0 0 / 0.35);
-  }
-}
-
+/* public/theme-init.js always sets data-theme, from the theme picked in Spans or else the system's. */
 :root[data-theme='dark'] {
   color-scheme: dark;
   --bg: #071a20;
@@ -67,9 +44,12 @@
   --done: #2fd3a5;
   --done-text: #052019;
   --over: #ff6b78;
+  /* The number sits on a cream island, so it needs a deeper red than the ring on the dark water. */
+  --over-text: #b4232f;
   --bridge: #e8d9b0;
   --cursor: #7ff0d3;
   --hint: #ffc94a;
+  --hint-edge: #ffc94a;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 40px rgb(0 0 0 / 0.35);
 }
 
@@ -221,6 +201,8 @@ button {
 }
 
 .segmented {
+  min-inline-size: 0;
+  margin: 0;
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
@@ -231,8 +213,11 @@ button {
   border: 1px solid var(--border);
 }
 
-.segmented button {
+.segmented label {
+  position: relative;
   display: grid;
+  align-content: center;
+  text-align: center;
   min-height: 44px;
   padding: 6px 8px;
   border: 0;
@@ -244,18 +229,32 @@ button {
   cursor: pointer;
 }
 
-.segmented button small {
+/* The radio itself is hidden; its label is the segment. */
+.segmented input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.segmented label:has(:focus-visible) {
+  outline: 3px solid var(--cursor);
+  outline-offset: 2px;
+}
+
+.segmented label small {
   font-weight: 500;
   font-size: 0.75rem;
 }
 
-.segmented button[aria-checked='true'] {
+.segmented label:has(:checked) {
   background: var(--surface);
   color: var(--text);
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
 }
 
-.segmented button.done-today::after {
+.segmented label.done-today::after {
   content: '✓ solved';
   font-size: 0.7rem;
   font-weight: 600;
@@ -398,6 +397,10 @@ button {
   font-size: 0.82rem;
 }
 
+.keys .key {
+  white-space: nowrap;
+}
+
 kbd {
   display: inline-block;
   min-width: 1.6em;
@@ -412,27 +415,16 @@ kbd {
   text-align: center;
 }
 
-.win {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 16px;
+dialog.win-card {
+  width: min(calc(100% - 32px), 380px);
+  padding: 24px;
+  border: 0;
+  text-align: center;
+}
+
+dialog.win-card::backdrop {
   background: rgb(4 20 24 / 0.45);
   backdrop-filter: blur(3px);
-}
-
-.win[hidden] {
-  display: none;
-}
-
-.win-card {
-  width: min(100%, 380px);
-  padding: 24px;
-  border-radius: 20px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
-  text-align: center;
 }
 
 .win-kicker {
@@ -509,7 +501,7 @@ dialog p {
     background: var(--surface-2);
     border-color: var(--border);
   }
-  .segmented button:not([aria-checked='true']):hover {
+  .segmented label:not(:has(:checked)):hover {
     color: var(--text);
   }
 }
