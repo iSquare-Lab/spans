@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Spans · a daily bridge puzzle</title>
+    <meta
+      name="description"
+      content="Link the islands with bridges until each has as many as its number. A new puzzle every day in three sizes, each with exactly one solution."
+    />
+    <meta name="theme-color" content="#eef5f4" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#071a20" media="(prefers-color-scheme: dark)" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script src="/theme-init.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+          <path d="M9 12h14M9 20h14" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" />
+          <circle cx="6.5" cy="16" r="5.5" fill="var(--done)" />
+          <circle cx="25.5" cy="16" r="5.5" fill="var(--done)" />
+        </svg>
+        <h1>Spans</h1>
+      </div>
+      <div class="top-actions">
+        <span class="streak" id="streak"></span>
+        <button type="button" class="icon-btn" id="help-btn" aria-label="How to play" data-icon="help"></button>
+        <button type="button" class="icon-btn" id="sound-btn" aria-pressed="true" aria-label="Sound" data-icon="sound"></button>
+        <button type="button" class="icon-btn" id="theme-btn" aria-label="Switch theme" data-icon="theme"></button>
+      </div>
+    </header>
+
+    <main class="game">
+      <section class="board-area" aria-label="Puzzle">
+        <div class="board-frame" id="board-frame">
+          <canvas
+            id="board"
+            tabindex="0"
+            role="application"
+            aria-roledescription="puzzle board"
+            aria-label="Bridge puzzle"
+            aria-describedby="board-help board-status"
+          ></canvas>
+          <div class="win" id="win" hidden>
+            <div class="win-card" role="dialog" aria-labelledby="win-title" aria-describedby="win-text">
+              <p class="win-kicker" id="win-kicker">Every island is linked</p>
+              <h2 id="win-title">Solved</h2>
+              <p class="win-time" id="win-time"></p>
+              <p id="win-text" class="win-text"></p>
+              <div class="win-actions">
+                <button type="button" class="ghost-btn" id="win-close">Look at it</button>
+                <button type="button" class="ghost-btn" id="win-share">Copy result</button>
+                <button type="button" class="primary-btn" id="win-next">Next puzzle</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p id="board-help" class="visually-hidden">
+          Arrow keys move between islands. Shift and an arrow key adds a bridge in that direction; a third press removes
+          both. U undoes, H gives a hint, R starts over.
+        </p>
+        <p id="board-status" class="visually-hidden" aria-live="polite"></p>
+      </section>
+
+      <aside class="panel">
+        <div class="segmented" role="radiogroup" aria-label="Puzzle" id="kind">
+          <button type="button" role="radio" data-kind="daily">Daily</button>
+          <button type="button" role="radio" data-kind="practice">Practice</button>
+        </div>
+        <div class="segmented sizes" role="radiogroup" aria-label="Size" id="difficulty">
+          <button type="button" role="radio" data-difficulty="easy">Easy<small>7×7</small></button>
+          <button type="button" role="radio" data-difficulty="medium">Medium<small>9×9</small></button>
+          <button type="button" role="radio" data-difficulty="hard">Hard<small>12×12</small></button>
+        </div>
+
+        <div class="title-row">
+          <h2 id="puzzle-title"></h2>
+          <p class="timer" id="timer" role="timer" aria-label="Time">0:00</p>
+        </div>
+        <p class="puzzle-sub" id="puzzle-sub"></p>
+
+        <div class="progress" aria-hidden="true"><span id="progress-bar"></span></div>
+        <p class="progress-text" id="progress-text"></p>
+
+        <p class="hint-text" id="hint-text" aria-live="polite"></p>
+
+        <div class="actions">
+          <button type="button" class="ghost-btn" id="undo-btn" aria-keyshortcuts="U"><span data-icon="undo"></span>Undo</button>
+          <button type="button" class="ghost-btn" id="hint-btn" aria-keyshortcuts="H"><span data-icon="bulb"></span>Hint</button>
+          <button type="button" class="ghost-btn" id="reset-btn" aria-keyshortcuts="R"><span data-icon="reset"></span>Start over</button>
+          <button type="button" class="ghost-btn" id="new-btn" aria-keyshortcuts="N"><span data-icon="shuffle"></span>New puzzle</button>
+        </div>
+
+        <dl class="stats">
+          <div><dt>Best time</dt><dd id="best">–</dd></div>
+          <div><dt>Day streak</dt><dd id="streak-count">0</dd></div>
+          <div><dt>Solved</dt><dd id="solved-count">0</dd></div>
+        </dl>
+
+        <p class="keys">
+          <kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd> move <span aria-hidden="true">·</span> <kbd>Shift</kbd>+arrow bridge
+          <span aria-hidden="true">·</span> <kbd>U</kbd> undo <span aria-hidden="true">·</span> <kbd>H</kbd> hint
+        </p>
+      </aside>
+    </main>
+
+    <dialog id="help-dialog" aria-labelledby="help-title">
+      <div class="dialog-head">
+        <h2 id="help-title">How to play</h2>
+        <button type="button" class="icon-btn" id="help-close" aria-label="Close" data-icon="close"></button>
+      </div>
+      <ol class="rules">
+        <li>Each island's number is how many bridges it needs.</li>
+        <li>Bridges run straight across or up and down, from one island to the next one it can see.</li>
+        <li>Two islands share at most two bridges, and bridges never cross.</li>
+        <li>When you are done, every island can reach every other one.</li>
+      </ol>
+      <p><strong>To build:</strong> drag from an island towards a neighbour, or tap the water between them. Again for a second bridge, a third time to remove them.</p>
+      <p>Islands turn green when they have the right number of bridges and red when they have too many.</p>
+      <p>Every puzzle has exactly one solution, reached by reasoning alone. Easy puzzles never need more than one step of thinking at a time; hard ones ask you to look further ahead.</p>
+      <p>The daily puzzles are the same for everyone and change at midnight. Your progress stays in this browser.</p>
+    </dialog>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

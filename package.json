@@ -1,0 +1,27 @@
+{
+  "name": "spans",
+  "version": "1.0.0",
+  "private": true,
+  "description": "An island-and-bridge logic puzzle: a new puzzle every day in three sizes, each with exactly one solution.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "puzzles": "node scripts/puzzle-report.ts"
+  },
+  "dependencies": {
+    "@fontsource-variable/outfit": "^5.3.0"
+  },
+  "devDependencies": {
+    "typescript": "~7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0"
+  }
+}
