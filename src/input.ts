@@ -96,6 +96,8 @@ export function bindBoard(canvas: HTMLCanvasElement, view: View, actions: BoardA
   };
 
   canvas.addEventListener('pointerdown', (e) => {
+    // Only the main button (touch and pen report it too): a right-click keeps its context menu.
+    if (e.button !== 0) return;
     const game = actions.game();
     if (!game) return;
     const [x, y] = pointAt(e);

@@ -301,6 +301,19 @@ function resize(): void {
 }
 new ResizeObserver(() => active && resize()).observe(frame);
 
+// Moving the window to a screen with another pixel ratio changes no CSS size, so it is watched on its own.
+function watchPixelRatio(): void {
+  window
+    .matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`)
+    .addEventListener('change', () => {
+      if (active) resize();
+      watchPixelRatio();
+    }, { once: true });
+}
+watchPixelRatio();
+// The numbers use the web font: draw again once it has arrived, in case the first paint came before it.
+void document.fonts.ready.then(() => redraw());
+
 // The board is drawn only when something changed, and on every frame only while a hint or the solved glow runs.
 let frameRequested = false;
 function redraw(): void {
@@ -361,6 +374,7 @@ function undo(): void {
   playBridge(game.bridges[edge]);
   status.textContent = `Undone. ${describeIsland(game.puzzle.edges[edge].a)}`;
   view.hint = null;
+  hintText.textContent = '';
   updateChrome();
   persist();
   resume();
@@ -373,6 +387,8 @@ function restart(): void {
   if (!window.confirm('Remove every bridge and start this puzzle over? The clock keeps running.')) return;
   game.restart();
   view.selected = null;
+  view.hint = null;
+  hintText.textContent = '';
   status.textContent = 'Every bridge removed.';
   updateChrome();
   persist();
@@ -448,17 +464,20 @@ $('win-share').addEventListener('click', async () => {
   window.setTimeout(() => (button.textContent = 'Copy result'), COPIED_MS);
 });
 
-// The help stops the clock while it is open and hands focus back to the board when it closes.
-function openHelp(): void {
+// The help stops the clock while it is open. When it closes, focus goes back to what opened it: the Help button,
+// or the board after the first-visit help.
+let helpOpener: HTMLElement | null = null;
+function openHelp(opener: HTMLElement | null = null): void {
+  helpOpener = opener;
   pause();
   helpDialog.showModal();
 }
-$('help-btn').addEventListener('click', openHelp);
+$('help-btn').addEventListener('click', () => openHelp($('help-btn')));
 $('help-close').addEventListener('click', () => helpDialog.close());
 helpDialog.addEventListener('click', (e) => e.target === helpDialog && helpDialog.close());
 helpDialog.addEventListener('close', () => {
   resume();
-  canvas.focus();
+  (helpOpener ?? canvas).focus();
 });
 
 soundButton();
