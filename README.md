@@ -1,5 +1,7 @@
 # Spans
 
+![Spans: a medium daily bridge puzzle in progress, with the timer, progress and hint buttons beside the board](docs/screenshot-dark.png)
+
 A daily logic puzzle about islands and bridges. Each island shows how many bridges it needs. Draw bridges
 straight across or up and down to the next island, at most two between the same pair, never crossing, until
 every island has its number and all of them are joined into one group.
